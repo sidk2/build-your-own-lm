@@ -7,15 +7,20 @@ import torch
 
 from collections import defaultdict
 
-from typing import Dict, List
+from typing import Dict, List, Set, Tuple
 
 class BPETokenizer:
     def __init__(self, vocab_size: int):
         self.vocab_size : int = vocab_size
-        self.vocabulary : Dict[str, int] = defaultdict(int)
+        self.vocabulary : Dict[int, str] = {}
+        self.rev_vocab : Dict[str, int] = {} # maybe use defaultdicts?
 
+        # Maps pair of tokens, (token_id, token_id), to merged id
+        self.token_ids : Dict[Tuple[int, int], int] = {}
 
-    def train(self, dataset: List[str]):
+    def train(self, dataset: List[str], 
+                    vocab_size: int,
+                    special_tokens : Set[str] = {"|<eot>|"}):
         '''
         Train the tokenizer.
 
@@ -29,9 +34,16 @@ class BPETokenizer:
             dataset: A dataset of text to train the tokenizer on. The
                 dataset format is expected to be a list of strings
         '''
-        for snippet in dataset:
-            for char in snippet:
-                char
+        # Step 1: Assign all unique characters in the corpus
+        # to token ids
+
+        for sample in dataset:
+            for char in sample:
+                if char not in self.rev_vocab:
+                    token_id = max(self.rev_vocab.values(), -1) + 1
+                    self.rev_vocab[char] = token_id
+                    self.vocab[token_id] = char
+
                 
         while len(self.vocabulary) < self.vocab_size:
 
