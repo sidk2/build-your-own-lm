@@ -44,10 +44,12 @@ class BPETokenizer:
                     self.rev_vocab[char] = token_id
                     self.vocab[token_id] = char
 
-                
-        while len(self.vocabulary) < self.vocab_size:
-
-        
+        if special_tokens:
+            for token in special_tokens:
+                if token not in self.rev_vocab:
+                    new_id = len(self.vocab)
+                    self.vocab[new_id] = token
+                    self.inverse_vocab[token] = new_id
 
     def encode(self, text):
         pass
