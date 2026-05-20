@@ -5,7 +5,12 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "black>=26.5.1",
     "huggingface>=0.0.1",
     "mlx-lm>=0.31.3",
+    "pytest>=9.0.3",
     "torch>=2.11.0",
 ]
+
+[tool.black]
+target-version = ["py313"]
