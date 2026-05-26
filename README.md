@@ -8,3 +8,9 @@ My ML experience has largely skirted around language modeling. I come from more 
 The goal of this repository is to build a small language model from scratch, training it on a small dataset to achieve reasonable performance. The model will be implemented in MLX. I will use the TinyStories dataset as the training data.
 
 I will implement the tokenizer, embeddings, transformer blocks, and training loop. Afterwards, I will potentially then implement a mixture-of-experts version of the model, as I think that would present a fun challenge. 
+
+## Notes on Experiments
+Planned experiments:
+    - Efficiency of BPE tokenizer with various optimizations (low priority)
+    - Performance difference between RoPE and sinusoidal embeddings
+    - Performance difference between bias and bias free linear layers in attention
