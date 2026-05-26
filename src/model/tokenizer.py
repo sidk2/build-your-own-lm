@@ -17,7 +17,42 @@ class BPETokenizer:
         self.token_ids: Dict[Tuple[int, int], int] = {}
         self.merge_rank: Dict[Tuple[int, int], int] = {}
 
+    def save(self, file_path: str) -> None:
+        import json
+        import os
+
+        data = {
+            "vocab_size": self.vocab_size,
+            "vocabulary": {str(k): v for k, v in self.vocabulary.items()},
+            "rev_vocab": self.rev_vocab,
+            "token_ids": {f"{k[0]},{k[1]}": v for k, v in self.token_ids.items()},
+            "merge_rank": {f"{k[0]},{k[1]}": v for k, v in self.merge_rank.items()},
+        }
+        os.makedirs(os.path.dirname(os.path.abspath(file_path)), exist_ok=True)
+        with open(file_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=4, ensure_ascii=False)
+
+    def load(self, file_path: str) -> None:
+        import json
+
+        with open(file_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        self.vocab_size = data["vocab_size"]
+        self.vocabulary = {int(k): v for k, v in data["vocabulary"].items()}
+        self.rev_vocab = data["rev_vocab"]
+
+        self.token_ids = {}
+        for k, v in data["token_ids"].items():
+            parts = k.split(",")
+            self.token_ids[(int(parts[0]), int(parts[1]))] = v
+
+        self.merge_rank = {}
+        for k, v in data["merge_rank"].items():
+            parts = k.split(",")
+            self.merge_rank[(int(parts[0]), int(parts[1]))] = v
+
     def pretokenize(self, text: str) -> List[str]:
+        """Splits the corpus into base units."""
         return re.findall(PRETOK_PATTERN, text)
 
     def get_vocab(self, corpus: List[str]) -> Dict[str, int]:
@@ -89,7 +124,7 @@ class BPETokenizer:
                 tokens.update(word.split())
         if merge_rules:
             for a, b in merge_rules:
-                tokens.add(a + b)  # every intermediate merged token
+                tokens.add(a + b)  
         tokens.update(["<unk>", "<pad>"])
         return {tok: idx for idx, tok in enumerate(sorted(tokens))}
 
