@@ -12,7 +12,6 @@ CORPUS = [
 def test_vocab():
     tokenizer = tkn.BPETokenizer(vocab_size=100)
     tokenizer.train(CORPUS)
-    # test properties that must hold regardless of merge order
     assert len(tokenizer.rev_vocab) <= 100
     assert "<unk>" in tokenizer.rev_vocab
     assert "<pad>" in tokenizer.rev_vocab
