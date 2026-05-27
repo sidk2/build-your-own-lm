@@ -3,8 +3,19 @@ import torch.nn as nn
 
 import math
 
+    
 # Note to self: another neat experiment could be comparing QK-Norm
 # to scaled dot product attention
+
+def sinusoidal_positional_embedding(seq_len : int, d_model : int, n : int = 10_000):
+    pe = torch.zeros(seq_len, d_model)
+    positions = torch.arange(0, seq_len).unsqueeze(1)
+    
+    # More numerically stable than pos / n^{2i / d_{model}}
+    div_term = torch.exp(torch.arange(0, d_model, 2) * -math.log(n) / d_model)
+    pe[:, 0::2] = torch.sin(positions * div_term)
+    pe[:, 1::2] = torch.cos(positions * div_term)
+    return pe
 
 class ScaledDotProductAttention(nn.Module):
     def __init__(self, key_query_dim : int, value_dim : int, masked : bool):
@@ -46,13 +57,6 @@ class MultiHeadAttention(nn.Module):
     def forward(self, query, key, value, mask):
         values = torch.cat([h(query, key, value, mask) for h in self.heads], dim=2)
         return self.out_proj(values)
-
-class SinusoidalPositionalEmbedding(nn.Module):
-    def __init__(self):
-        pass
-
-    def forward(self):
-        pass
 
 
 class RotaryPositionalEmbedding(nn.Module):
