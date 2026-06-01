@@ -88,3 +88,40 @@ def test_causal_masking():
     assert torch.allclose(logits1[:, :3, :], logits2[:, :3, :], atol=1e-5)
     # The output for the 4th token can differ
     assert not torch.allclose(logits1[:, 3, :], logits2[:, 3, :], atol=1e-5)
+
+
+def test_generation_shape_and_range():
+    vocab_size = 50
+    d_model = 16
+    num_heads = 2
+    num_layers = 1
+
+    gpt = GPT(
+        vocab_size=vocab_size,
+        d_model=d_model,
+        num_heads=num_heads,
+        num_layers=num_layers,
+        use_bias=False,
+        masked=True,
+    )
+    gpt.eval()
+
+    batch_size = 2
+    seq_len = 5
+    max_new_tokens = 10
+
+    idx = torch.randint(0, vocab_size, (batch_size, seq_len))
+
+    # Test generation
+    out = gpt.generate(idx, max_new_tokens=max_new_tokens, temperature=0.8, top_k=10)
+
+    # Expected output shape: [batch_size, seq_len + max_new_tokens]
+    assert out.shape == (batch_size, seq_len + max_new_tokens)
+
+    # Assert generated tokens are within vocabulary
+    assert torch.all(out >= 0)
+    assert torch.all(out < vocab_size)
+
+    # Assert original sequence was preserved
+    assert torch.equal(out[:, :seq_len], idx)
+

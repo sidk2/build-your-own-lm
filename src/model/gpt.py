@@ -89,3 +89,49 @@ class GPT(nn.Module):
             )
 
         return logits, loss
+
+    @torch.no_grad()
+    def generate(
+        self,
+        idx: torch.Tensor,
+        max_new_tokens: int,
+        temperature: float = 1.0,
+        top_k: int = None,
+    ) -> torch.Tensor:
+        """
+        Generate new tokens given a conditioning sequence of indices.
+        idx: [batch_size, seq_len] tensor of token IDs
+        """
+        # Ensure we are in eval mode for generation
+        was_training = self.training
+        self.eval()
+
+        for _ in range(max_new_tokens):
+            # Crop index to context length if needed
+            idx_cond = idx[:, -self.context_length :]
+
+            # Forward pass
+            logits, _ = self(idx_cond)
+            # Focus only on the last time step: shape [batch_size, vocab_size]
+            logits = logits[:, -1, :]
+
+            if temperature != 1.0 and temperature > 0.0:
+                logits = logits / temperature
+
+            # Optionally crop to top-k
+            if top_k is not None:
+                v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
+                logits[logits < v[:, [-1]]] = -float("Inf")
+
+            # Softmax to get probabilities
+            probs = torch.softmax(logits, dim=-1)
+            # Sample next token
+            idx_next = torch.multinomial(probs, num_samples=1)
+            # Append sampled index
+            idx = torch.cat((idx, idx_next), dim=1)
+
+        if was_training:
+            self.train()
+
+        return idx
+
