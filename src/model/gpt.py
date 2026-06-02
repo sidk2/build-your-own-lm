@@ -97,6 +97,7 @@ class GPT(nn.Module):
         max_new_tokens: int,
         temperature: float = 1.0,
         top_k: int = None,
+        eos_token_id: int = None,
     ) -> torch.Tensor:
         """
         Generate new tokens given a conditioning sequence of indices.
@@ -129,6 +130,10 @@ class GPT(nn.Module):
             idx_next = torch.multinomial(probs, num_samples=1)
             # Append sampled index
             idx = torch.cat((idx, idx_next), dim=1)
+
+            # Stop early if EOS token is generated
+            if eos_token_id is not None and (idx_next == eos_token_id).all():
+                break
 
         if was_training:
             self.train()

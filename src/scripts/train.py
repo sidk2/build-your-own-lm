@@ -102,7 +102,8 @@ def sample_text(
     if not encoded:
         encoded = [tokenizer.rev_vocab.get("<unk>", 0)]
     x = torch.tensor(encoded, dtype=torch.long, device=device).unsqueeze(0)
-    y = model.generate(x, max_new_tokens=max_new_tokens, temperature=0.8, top_k=50)
+    eos_id = tokenizer.rev_vocab.get("<eos>", None)
+    y = model.generate(x, max_new_tokens=max_new_tokens, temperature=0.8, top_k=50, eos_token_id=eos_id)
     return tokenizer.decode(y[0].tolist())
 
 
@@ -130,7 +131,7 @@ def main():
     parser.add_argument(
         "--context-length",
         type=int,
-        default=256,
+        default=1024,
         help="Maximum sequence/context length",
     )
 

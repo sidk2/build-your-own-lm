@@ -50,13 +50,13 @@ class TinyStoriesDataset(Dataset):
         print(f"Pre-tokenizing {len(self.raw_dataset)} stories...")
         all_tokens = []
         from tqdm import tqdm
-        pad_id = self.tokenizer.rev_vocab.get("<pad>", 0)
+        eos_id = self.tokenizer.rev_vocab.get("<eos>", 0)
         
         for item in tqdm(self.raw_dataset, desc="Tokenizing"):
             text = item["text"]
             ids = self.tokenizer.encode(text)
-            # Add padding/EOS token to separate stories
-            all_tokens.extend(ids + [pad_id])
+            # Append EOS token to mark end of each story
+            all_tokens.extend(ids + [eos_id])
 
         self.tokens_data = torch.tensor(all_tokens, dtype=torch.long)
         self.num_blocks = max(1, len(self.tokens_data) // self.block_size)
@@ -94,7 +94,9 @@ class TinyStoriesDataset(Dataset):
             # Tokenize on-the-fly
             text = self.raw_dataset[idx]["text"]
             pad_id = self.tokenizer.rev_vocab.get("<pad>", 0) if self.tokenizer is not None else 0
+            eos_id = self.tokenizer.rev_vocab.get("<eos>", 0) if self.tokenizer is not None else 0
             ids = self.tokenizer.encode(text) if self.tokenizer is not None else [0]
+            ids.append(eos_id)
             
             # Truncate or pad to block_size + 1
             if len(ids) > self.block_size + 1:

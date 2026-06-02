@@ -2,6 +2,7 @@
 Implementation of a byte-pair encoding tokenizer.
 """
 
+import heapq
 import re
 import tqdm
 from collections import defaultdict
@@ -53,82 +54,108 @@ class BPETokenizer:
             self.merge_rank[(int(parts[0]), int(parts[1]))] = v
 
     def pretokenize(self, text: str) -> List[str]:
-        """Splits the corpus into base units."""
         return re.findall(PRETOK_PATTERN, text)
 
-    def get_vocab(self, corpus: List[str]) -> Dict[str, int]:
-        vocab = defaultdict(int)
+    def get_vocab(self, corpus: List[str]) -> Dict[str, Tuple[List[str], int]]:
+        counts = defaultdict(int)
         for text in tqdm.tqdm(corpus, desc="Building Initial Vocab", leave=False):
             for word in self.pretokenize(text):
                 word = word.strip()
                 if word:
-                    vocab[" ".join(list(word)) + " </w>"] += 1
-        return vocab
+                    counts[word] += 1
+        return {word: (list(word) + ["</w>"], freq) for word, freq in counts.items()}
 
-    def get_pair_stats(self, vocab: Dict[str, int]) -> Dict[Tuple, int]:
+    def get_pair_stats(self, vocab: Dict[str, Tuple[List[str], int]]) -> Dict[Tuple, int]:
         pair_frequency: Dict[Tuple, int] = defaultdict(int)
-        for item, freq in vocab.items():
-            toks = item.split()
-            for idx in range(len(toks) - 1):
-                pair_frequency[(toks[idx], toks[idx + 1])] += freq
+        for symbols, freq in vocab.values():
+            for idx in range(len(symbols) - 1):
+                pair_frequency[(symbols[idx], symbols[idx + 1])] += freq
         return pair_frequency
 
-    def merge_vocab(
-        self, vocab: Dict[str, int], pair_stats: Dict[Tuple, int]
-    ) -> Tuple[Dict[str, int], Tuple]:
-        best_pair = max(pair_stats, key=pair_stats.get)
-        new_vocab = {}
-        for token, freq in vocab.items():
-            tok_list = token.split()
-            new_tok_list = []
-            idx = 0
-            while idx < len(tok_list):
-                if (
-                    idx < len(tok_list) - 1
-                    and (tok_list[idx], tok_list[idx + 1]) == best_pair
-                ):
-                    new_tok_list.append(tok_list[idx] + tok_list[idx + 1])
-                    idx += 2
-                else:
-                    new_tok_list.append(tok_list[idx])
-                    idx += 1
-            new_vocab[" ".join(new_tok_list)] = freq
-        return new_vocab, best_pair
+    def build_heap(self, pair_stats: Dict[Tuple, int]) -> List:
+        heap = [(-freq, pair) for pair, freq in pair_stats.items()]
+        heapq.heapify(heap)
+        return heap
 
-    def train_bpe(
-        self, corpus: List[str]
-    ) -> Tuple[Dict[str, int], List[Tuple[str, str]], Dict[str, int]]:
-        merge_rules = []
+    def pop_best(self, heap, pair_stats) -> Tuple[Tuple, int]:
+        while heap:
+            neg_freq, pair = heapq.heappop(heap)
+            if pair_stats.get(pair, 0) == -neg_freq:
+                return pair, -neg_freq
+        return None, 0
+
+    def merge_and_update(self, vocab, pair_stats, heap, best_pair):
+        a, b = best_pair
+        merged = a + b
+
+        for word, (symbols, freq) in vocab.items():
+            if a not in symbols:
+                continue
+            if not any(symbols[i] == a and symbols[i + 1] == b for i in range(len(symbols) - 1)):
+                continue
+
+            old_pairs = [(symbols[i], symbols[i + 1]) for i in range(len(symbols) - 1)]
+
+            new_symbols = []
+            i = 0
+            while i < len(symbols):
+                if i < len(symbols) - 1 and symbols[i] == a and symbols[i + 1] == b:
+                    new_symbols.append(merged)
+                    i += 2
+                else:
+                    new_symbols.append(symbols[i])
+                    i += 1
+
+            new_pairs = [(new_symbols[i], new_symbols[i + 1]) for i in range(len(new_symbols) - 1)]
+
+            old_counts: Dict[Tuple, int] = defaultdict(int)
+            new_counts: Dict[Tuple, int] = defaultdict(int)
+            for p in old_pairs:
+                old_counts[p] += 1
+            for p in new_pairs:
+                new_counts[p] += 1
+
+            for p in set(old_counts) | set(new_counts):
+                delta = (new_counts[p] - old_counts[p]) * freq
+                if delta != 0:
+                    pair_stats[p] += delta
+                    heapq.heappush(heap, (-pair_stats[p], p))
+
+            vocab[word] = (new_symbols, freq)
+
+        return vocab, pair_stats
+
+    def train_bpe(self, corpus: List[str]):
         vocab = self.get_vocab(corpus)
-        initial_vocab = vocab.copy()  # snapshot before any merges
-        initial_vocab_size = len(set(sym for word in vocab for sym in word.split()))
+        initial_vocab = {w: (syms[:], freq) for w, (syms, freq) in vocab.items()}
+
+        pair_stats = self.get_pair_stats(vocab)
+        heap = self.build_heap(pair_stats)
+
+        initial_vocab_size = len(set(s for syms, _ in vocab.values() for s in syms))
         num_merges = self.vocab_size - initial_vocab_size
-        pbar = tqdm.trange(num_merges, desc="Training BPE Tokenizer")
-        for _ in pbar:
-            stats = self.get_pair_stats(vocab)
-            if not stats:
+        merge_rules = []
+
+        for _ in tqdm.trange(num_merges, desc="Training BPE"):
+            best_pair, freq = self.pop_best(heap, pair_stats)
+            if best_pair is None or freq == 0:
                 break
-            vocab, merge_rule = self.merge_vocab(vocab, stats)
-            merge_rules.append(merge_rule)
-            pbar.set_postfix({"current_vocab": len(vocab)})
+            vocab, pair_stats = self.merge_and_update(vocab, pair_stats, heap, best_pair)
+            merge_rules.append(best_pair)
+
         return vocab, merge_rules, initial_vocab
 
-    def build_token_vocab(
-        self,
-        vocab: Dict[str, int],
-        initial_vocab: Dict[str, int] = None,
-        merge_rules: List[Tuple] = None,
-    ) -> Dict[str, int]:
+    def build_token_vocab(self, vocab, initial_vocab=None, merge_rules=None) -> Dict[str, int]:
         tokens = set()
-        for word in vocab:
-            tokens.update(word.split())
+        for symbols, _ in vocab.values():
+            tokens.update(symbols)
         if initial_vocab:
-            for word in initial_vocab:
-                tokens.update(word.split())
+            for symbols, _ in initial_vocab.values():
+                tokens.update(symbols)
         if merge_rules:
             for a, b in merge_rules:
-                tokens.add(a + b)  
-        tokens.update(["<unk>", "<pad>"])
+                tokens.add(a + b)
+        tokens.update(["<unk>", "<pad>", "<eos>"])
         return {tok: idx for idx, tok in enumerate(sorted(tokens))}
 
     def train(self, corpus: List[str]):
@@ -168,14 +195,14 @@ class BPETokenizer:
                     break
 
                 merged_id = self.token_ids[(ids[best_idx], ids[best_idx + 1])]
-                ids = ids[:best_idx] + [merged_id] + ids[best_idx + 2 :]
+                ids = ids[:best_idx] + [merged_id] + ids[best_idx + 2:]
 
             all_ids.extend(ids)
         return all_ids
 
     def decode(self, tokens: List[int]) -> str:
         text = "".join(self.vocabulary.get(i, "<unk>") for i in tokens)
-        return text.replace("</w>", " ").strip()
+        return text.replace("</w>", " ").replace("<eos>", "").replace("<pad>", "").strip()
 
 
 if __name__ == "__main__":
