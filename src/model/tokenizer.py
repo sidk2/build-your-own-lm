@@ -3,6 +3,7 @@ Implementation of a byte-pair encoding tokenizer.
 """
 
 import re
+import tqdm
 from collections import defaultdict
 from typing import Dict, List, Tuple
 
@@ -57,7 +58,7 @@ class BPETokenizer:
 
     def get_vocab(self, corpus: List[str]) -> Dict[str, int]:
         vocab = defaultdict(int)
-        for text in corpus:
+        for text in tqdm.tqdm(corpus, desc="Building Initial Vocab", leave=False):
             for word in self.pretokenize(text):
                 word = word.strip()
                 if word:
@@ -102,12 +103,14 @@ class BPETokenizer:
         initial_vocab = vocab.copy()  # snapshot before any merges
         initial_vocab_size = len(set(sym for word in vocab for sym in word.split()))
         num_merges = self.vocab_size - initial_vocab_size
-        for _ in range(num_merges):
+        pbar = tqdm.trange(num_merges, desc="Training BPE Tokenizer")
+        for _ in pbar:
             stats = self.get_pair_stats(vocab)
             if not stats:
                 break
             vocab, merge_rule = self.merge_vocab(vocab, stats)
             merge_rules.append(merge_rule)
+            pbar.set_postfix({"current_vocab": len(vocab)})
         return vocab, merge_rules, initial_vocab
 
     def build_token_vocab(
