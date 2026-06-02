@@ -16,5 +16,17 @@ dependencies = [
     "tqdm>=4.67.3",
 ]
 
+[build-system]
+requires = ["setuptools>=61.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[project.scripts]
+mini-gpt-train = "scripts.train:main"
+mini-gpt-tokenizer = "scripts.run_tokenizer:main"
+
 [tool.black]
 target-version = ["py313"]
+
