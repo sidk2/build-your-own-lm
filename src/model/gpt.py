@@ -15,6 +15,8 @@ class GPT(nn.Module):
         masked: bool,
         tokenizer_path: str = None,
         context_length: int = 512,
+        dropout: float = 0.1,
+        pad_token_id: int = -1,
     ):
         super().__init__()
         self.vocab_size = vocab_size
@@ -24,6 +26,7 @@ class GPT(nn.Module):
         self.use_bias = use_bias
         self.masked = masked
         self.context_length = context_length
+        self.pad_token_id = pad_token_id
 
         # Load tokenizer if path provided
         if tokenizer_path is not None:
@@ -43,6 +46,8 @@ class GPT(nn.Module):
             ),
         )
 
+        self.embed_dropout = nn.Dropout(dropout)
+
         self.layers = nn.ModuleList(
             [
                 tfmr.TransformerBlock(
@@ -50,6 +55,7 @@ class GPT(nn.Module):
                     d_model=d_model,
                     use_bias=use_bias,
                     masked=masked,
+                    dropout=dropout,
                 )
                 for _ in range(num_layers)
             ]
@@ -64,7 +70,7 @@ class GPT(nn.Module):
 
         token_emb = self.token_embedding(idx)  # [batch_size, seq_len, d_model]
         pos_emb = self.pos_embedding[:seq_len, :].unsqueeze(0)  # [1, seq_len, d_model]
-        x = token_emb + pos_emb  # [batch_size, seq_len, d_model]
+        x = self.embed_dropout(token_emb + pos_emb)  # [batch_size, seq_len, d_model]
 
         mask = None
         if self.masked:
@@ -83,9 +89,7 @@ class GPT(nn.Module):
             loss = nn.functional.cross_entropy(
                 logits.view(-1, logits.size(-1)),
                 targets.view(-1),
-                ignore_index=(
-                    self.tokenizer.rev_vocab.get("<pad>", -1) if self.tokenizer else -1
-                ),
+                ignore_index=self.pad_token_id,
             )
 
         return logits, loss

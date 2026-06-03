@@ -297,6 +297,8 @@ def main():
     train_iter = get_batch_generator(train_loader, device)
     val_iter = get_batch_generator(val_loader, device)
 
+    pad_token_id = tokenizer.rev_vocab.get("<pad>", -1)
+
     print("Initializing GPT model...")
     model = GPT(
         vocab_size=vocab_size,
@@ -306,6 +308,7 @@ def main():
         use_bias=args.use_bias,
         masked=True,
         context_length=args.context_length,
+        pad_token_id=pad_token_id,
     )
     model.to(device)
 

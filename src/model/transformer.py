@@ -19,13 +19,12 @@ def sinusoidal_positional_embedding(seq_len: int, d_model: int, n: int = 10_000)
 
 
 class ScaledDotProductAttention(nn.Module):
-    def __init__(self, masked: bool):
+    def __init__(self, masked: bool, dropout: float = 0.1):
         super().__init__()
         self.masked = masked
+        self.attn_dropout = nn.Dropout(dropout)
 
     def forward(self, query, key, value, mask=None):
-        # query, key, value shapes: [batch_size, num_heads, seq_len, head_dim]
-        # attn_scores shape: [batch_size, num_heads, seq_len, seq_len]
         attn_scores = (query @ key.transpose(-2, -1)) / math.sqrt(query.size(-1))
         
         if mask is not None:
@@ -36,11 +35,12 @@ class ScaledDotProductAttention(nn.Module):
             attn_scores = attn_scores.masked_fill(causal_mask == 0, float('-inf'))
             
         attn_probs = nn.functional.softmax(attn_scores, dim=-1)
+        attn_probs = self.attn_dropout(attn_probs)
         return attn_probs @ value
 
 
 class MultiHeadAttention(nn.Module):
-    def __init__(self, num_heads: int, d_model: int, use_bias: bool, masked: bool):
+    def __init__(self, num_heads: int, d_model: int, use_bias: bool, masked: bool, dropout: float = 0.1):
         super().__init__()
         assert d_model % num_heads == 0
 
@@ -48,12 +48,10 @@ class MultiHeadAttention(nn.Module):
         self.d_model = d_model
         self.head_dim = d_model // num_heads
 
-        # Single projection for Q, K, V. Is more efficient to use one 
-        # large matrix and then chunk it, than to use three separate
-        # matrices. 
         self.qkv_proj = nn.Linear(d_model, 3 * d_model, bias=use_bias)
-        self.attn = ScaledDotProductAttention(masked=masked)
+        self.attn = ScaledDotProductAttention(masked=masked, dropout=dropout)
         self.out_proj = nn.Linear(d_model, d_model, bias=use_bias)
+        self.resid_dropout = nn.Dropout(dropout)
 
     def forward(self, x, mask=None):
         batch_size, seq_len, d_model = x.size()
@@ -73,19 +71,20 @@ class MultiHeadAttention(nn.Module):
         # Reshape back to [batch_size, seq_len, d_model]
         out = out.transpose(1, 2).contiguous().view(batch_size, seq_len, self.d_model)
 
-        return self.out_proj(out)
+        return self.resid_dropout(self.out_proj(out))
 
 
 class RotaryPositionalEmbedding(nn.Module):
-    def __init__(self):
+    def __init__(self, d_model):
         super().__init__()
+        
 
     def forward(self):
         pass
 
 
 class TransformerBlock(nn.Module):
-    def __init__(self, num_heads: int, d_model: int, use_bias: bool, masked: bool):
+    def __init__(self, num_heads: int, d_model: int, use_bias: bool, masked: bool, dropout: float = 0.1):
         super().__init__()
         self.ln1 = nn.LayerNorm(d_model)
         self.mha = MultiHeadAttention(
@@ -93,12 +92,15 @@ class TransformerBlock(nn.Module):
             d_model=d_model,
             use_bias=use_bias,
             masked=masked,
+            dropout=dropout,
         )
         self.ln2 = nn.LayerNorm(d_model)
         self.mlp = nn.Sequential(
             nn.Linear(d_model, 4 * d_model, bias=use_bias),
             nn.GELU(),
-            nn.Linear(4 * d_model, d_model, bias=use_bias)
+            nn.Dropout(dropout),
+            nn.Linear(4 * d_model, d_model, bias=use_bias),
+            nn.Dropout(dropout),
         )
 
     def forward(self, x, mask=None):

@@ -77,6 +77,14 @@ class BPETokenizer:
         heapq.heapify(heap)
         return heap
 
+    def build_pair_index(self, vocab):
+        """Build inverted index: pair -> set of words containing that pair."""
+        pair_index = defaultdict(set)
+        for word, (symbols, freq) in vocab.items():
+            for i in range(len(symbols) - 1):
+                pair_index[(symbols[i], symbols[i + 1])].add(word)
+        return pair_index
+
     def pop_best(self, heap, pair_stats) -> Tuple[Tuple, int]:
         while heap:
             neg_freq, pair = heapq.heappop(heap)
@@ -84,17 +92,25 @@ class BPETokenizer:
                 return pair, -neg_freq
         return None, 0
 
-    def merge_and_update(self, vocab, pair_stats, heap, best_pair):
+    def merge_and_update(self, vocab, pair_stats, heap, best_pair, pair_index):
         a, b = best_pair
         merged = a + b
 
-        for word, (symbols, freq) in vocab.items():
-            if a not in symbols:
-                continue
+        # Inverted index lets us do merges faster
+        affected_words = list(pair_index.get(best_pair, set()))
+        pair_index.pop(best_pair, None)
+
+        for word in affected_words:
+            symbols, freq = vocab[word]
+
             if not any(symbols[i] == a and symbols[i + 1] == b for i in range(len(symbols) - 1)):
                 continue
 
-            old_pairs = [(symbols[i], symbols[i + 1]) for i in range(len(symbols) - 1)]
+            old_pair_set = set((symbols[i], symbols[i + 1]) for i in range(len(symbols) - 1))
+
+            old_counts: Dict[Tuple, int] = defaultdict(int)
+            for i in range(len(symbols) - 1):
+                old_counts[(symbols[i], symbols[i + 1])] += 1
 
             new_symbols = []
             i = 0
@@ -106,20 +122,27 @@ class BPETokenizer:
                     new_symbols.append(symbols[i])
                     i += 1
 
-            new_pairs = [(new_symbols[i], new_symbols[i + 1]) for i in range(len(new_symbols) - 1)]
+            new_pair_set = set((new_symbols[i], new_symbols[i + 1]) for i in range(len(new_symbols) - 1))
 
-            old_counts: Dict[Tuple, int] = defaultdict(int)
             new_counts: Dict[Tuple, int] = defaultdict(int)
-            for p in old_pairs:
-                old_counts[p] += 1
-            for p in new_pairs:
-                new_counts[p] += 1
+            for i in range(len(new_symbols) - 1):
+                new_counts[(new_symbols[i], new_symbols[i + 1])] += 1
 
+            # Update pair frequency stats
             for p in set(old_counts) | set(new_counts):
                 delta = (new_counts[p] - old_counts[p]) * freq
                 if delta != 0:
                     pair_stats[p] += delta
                     heapq.heappush(heap, (-pair_stats[p], p))
+
+            # Update inverted index
+            for p in old_pair_set - new_pair_set:
+                if p in pair_index:
+                    pair_index[p].discard(word)
+                    if not pair_index[p]:
+                        del pair_index[p]
+            for p in new_pair_set - old_pair_set:
+                pair_index[p].add(word)
 
             vocab[word] = (new_symbols, freq)
 
@@ -131,6 +154,7 @@ class BPETokenizer:
 
         pair_stats = self.get_pair_stats(vocab)
         heap = self.build_heap(pair_stats)
+        pair_index = self.build_pair_index(vocab)
 
         initial_vocab_size = len(set(s for syms, _ in vocab.values() for s in syms))
         num_merges = self.vocab_size - initial_vocab_size
@@ -140,7 +164,7 @@ class BPETokenizer:
             best_pair, freq = self.pop_best(heap, pair_stats)
             if best_pair is None or freq == 0:
                 break
-            vocab, pair_stats = self.merge_and_update(vocab, pair_stats, heap, best_pair)
+            vocab, pair_stats = self.merge_and_update(vocab, pair_stats, heap, best_pair, pair_index)
             merge_rules.append(best_pair)
 
         return vocab, merge_rules, initial_vocab
@@ -182,22 +206,61 @@ class BPETokenizer:
             symbols = list(word) + ["</w>"]
             ids = [self.rev_vocab.get(s, self.rev_vocab["<unk>"]) for s in symbols]
 
-            while len(ids) > 1:
-                best_rank = float("inf")
-                best_idx = None
-                for i in range(len(ids) - 1):
-                    rank = self.merge_rank.get((ids[i], ids[i + 1]), float("inf"))
-                    if rank < best_rank:
-                        best_rank = rank
-                        best_idx = i
+            if len(ids) <= 1:
+                all_ids.extend(ids)
+                continue
 
-                if best_idx is None:
-                    break
+            # Min-heap + linked list for O(n log n) merging.
+            # Each node i holds tokens[i], linked via prev/next arrays.
+            # The heap stores (rank, left_pos, right_pos) with lazy deletion.
+            n = len(ids)
+            tokens = list(ids)
+            prev_node = list(range(-1, n - 1))
+            next_node = list(range(1, n + 1))
+            active = [True] * n
 
-                merged_id = self.token_ids[(ids[best_idx], ids[best_idx + 1])]
-                ids = ids[:best_idx] + [merged_id] + ids[best_idx + 2:]
+            encode_heap = []
+            for i in range(n - 1):
+                rank = self.merge_rank.get((tokens[i], tokens[i + 1]), None)
+                if rank is not None:
+                    heapq.heappush(encode_heap, (rank, i, i + 1))
 
-            all_ids.extend(ids)
+            while encode_heap:
+                rank, left, right = heapq.heappop(encode_heap)
+
+                # Lazy deletion
+                if not active[left] or not active[right] or next_node[left] != right:
+                    continue
+                pair = (tokens[left], tokens[right])
+                if self.merge_rank.get(pair, None) != rank:
+                    continue
+
+                tokens[left] = self.token_ids[pair]
+                active[right] = False
+                next_node[left] = next_node[right]
+                if next_node[right] < n:
+                    prev_node[next_node[right]] = left
+
+                if prev_node[left] >= 0:
+                    new_rank = self.merge_rank.get(
+                        (tokens[prev_node[left]], tokens[left]), None
+                    )
+                    if new_rank is not None:
+                        heapq.heappush(encode_heap, (new_rank, prev_node[left], left))
+
+                if next_node[left] < n:
+                    new_rank = self.merge_rank.get(
+                        (tokens[left], tokens[next_node[left]]), None
+                    )
+                    if new_rank is not None:
+                        heapq.heappush(encode_heap, (new_rank, left, next_node[left]))
+
+            # Walk the linked list to collect surviving tokens
+            pos = 0
+            while pos < n:
+                all_ids.append(tokens[pos])
+                pos = next_node[pos]
+
         return all_ids
 
     def decode(self, tokens: List[int]) -> str:
