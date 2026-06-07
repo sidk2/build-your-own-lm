@@ -8,4 +8,8 @@ wheels/
 
 # Virtual environments
 .venv
-data/
+
+# Generated training artifacts
+/data/
+/src/data/tokenizer.json
+/src/data/out/
