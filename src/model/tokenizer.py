@@ -3,14 +3,23 @@ Implementation of a byte-pair encoding tokenizer.
 """
 
 import heapq
+import multiprocessing
 import re
 import tqdm
 from collections import defaultdict
 from typing import Dict, List, Tuple
 
 PRETOK_PATTERN = re.compile(r"""'s|'t|'re|'ve|'m|'ll|'d| ?\w+| ?\d+| ?[^\s\w\d]+|\s+""")
+N_PROC = multiprocessing.cpu_count()
 
-
+def process_text(text: str) -> Dict[str, int]:
+    text_counts = defaultdict(int)
+    for word in PRETOK_PATTERN.findall(text):
+        word = word.strip()
+        if word:
+            text_counts[word] += 1
+    return text_counts
+    
 class BPETokenizer:
     def __init__(self, vocab_size: int):
         self.vocab_size: int = vocab_size
@@ -52,17 +61,18 @@ class BPETokenizer:
         for k, v in data["merge_rank"].items():
             parts = k.split(",")
             self.merge_rank[(int(parts[0]), int(parts[1]))] = v
-
+            
     def pretokenize(self, text: str) -> List[str]:
         return re.findall(PRETOK_PATTERN, text)
 
     def get_vocab(self, corpus: List[str]) -> Dict[str, Tuple[List[str], int]]:
         counts = defaultdict(int)
-        for text in tqdm.tqdm(corpus, desc="Building Initial Vocab", leave=False):
-            for word in self.pretokenize(text):
-                word = word.strip()
-                if word:
-                    counts[word] += 1
+
+        with multiprocessing.Pool(processes=N_PROC) as pool:
+            results = pool.imap(process_text, corpus)
+            for text_counts in tqdm.tqdm(results, desc="Building Initial Vocab", leave=False):
+                for word, freq in text_counts.items():
+                    counts[word] += freq
         return {word: (list(word) + ["</w>"], freq) for word, freq in counts.items()}
 
     def get_pair_stats(self, vocab: Dict[str, Tuple[List[str], int]]) -> Dict[Tuple, int]:

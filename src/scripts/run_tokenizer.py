@@ -23,7 +23,7 @@ def main():
     parser.add_argument(
         "--num-train-stories",
         type=int,
-        default=50000,
+        default=2_000_000,
         help="Number of stories to train the BPE tokenizer on",
     )
     parser.add_argument(
