@@ -120,18 +120,20 @@ class GPT(nn.Module):
             # Focus only on the last time step: shape [batch_size, vocab_size]
             logits = logits[:, -1, :]
 
-            if temperature != 1.0 and temperature > 0.0:
+            if temperature == 0:
+                idx_next = torch.argmax(logits, dim=-1)
+            else:
                 logits = logits / temperature
+                # Optionally crop to top-k
+                if top_k is not None:
+                    v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
+                    logits[logits < v[:, [-1]]] = -float("Inf")
 
-            # Optionally crop to top-k
-            if top_k is not None:
-                v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
-                logits[logits < v[:, [-1]]] = -float("Inf")
+                # Softmax to get probabilities
+                probs = torch.softmax(logits, dim=-1)
+                # Sample next token
+                idx_next = torch.multinomial(probs, num_samples=1)
 
-            # Softmax to get probabilities
-            probs = torch.softmax(logits, dim=-1)
-            # Sample next token
-            idx_next = torch.multinomial(probs, num_samples=1)
             # Append sampled index
             idx = torch.cat((idx, idx_next), dim=1)
 
