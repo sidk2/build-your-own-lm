@@ -205,7 +205,7 @@ def main():
     parser.add_argument(
         "--limit-samples",
         type=int,
-        default=50000,
+        default=1_000_000,
         help="Limit number of TinyStories stories (useful for tests)",
     )
     parser.add_argument(
