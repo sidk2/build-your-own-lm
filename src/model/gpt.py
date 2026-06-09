@@ -111,6 +111,9 @@ class GPT(nn.Module):
         was_training = self.training
         self.eval()
 
+        if top_k is not None and top_k <= 0:
+            raise ValueError("top_k, if passed, must be positive")
+
         for _ in range(max_new_tokens):
             # Crop index to context length if needed
             idx_cond = idx[:, -self.context_length :]
