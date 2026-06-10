@@ -18,6 +18,20 @@ def sinusoidal_positional_embedding(seq_len: int, d_model: int, n: int = 10_000)
     return pe
 
 
+class SwiGLU(nn.Module):
+    def __init__(self, dim):
+        super().__init__()
+        self.lin1 = nn.Linear(dim, dim)
+        self.lin2 = nn.Linear(dim, dim)
+
+    def forward(self, x):
+        output = self.lin1(x)
+        swish = output * torch.sigmoid(output)
+        swiglu = swish * self.lin2(x)
+
+        return swiglu
+
+
 class ScaledDotProductAttention(nn.Module):
     def __init__(self, masked: bool, dropout: float = 0.1):
         super().__init__()
@@ -26,21 +40,30 @@ class ScaledDotProductAttention(nn.Module):
 
     def forward(self, query, key, value, mask=None):
         attn_scores = (query @ key.transpose(-2, -1)) / math.sqrt(query.size(-1))
-        
+
         if mask is not None:
-            attn_scores = attn_scores.masked_fill(mask == 0, float('-inf'))
+            attn_scores = attn_scores.masked_fill(mask == 0, float("-inf"))
         elif self.masked:
             seq_len = query.size(-2)
-            causal_mask = torch.tril(torch.ones(seq_len, seq_len, device=query.device)).view(1, 1, seq_len, seq_len)
-            attn_scores = attn_scores.masked_fill(causal_mask == 0, float('-inf'))
-            
+            causal_mask = torch.tril(
+                torch.ones(seq_len, seq_len, device=query.device)
+            ).view(1, 1, seq_len, seq_len)
+            attn_scores = attn_scores.masked_fill(causal_mask == 0, float("-inf"))
+
         attn_probs = nn.functional.softmax(attn_scores, dim=-1)
         attn_probs = self.attn_dropout(attn_probs)
         return attn_probs @ value
 
 
 class MultiHeadAttention(nn.Module):
-    def __init__(self, num_heads: int, d_model: int, use_bias: bool, masked: bool, dropout: float = 0.1):
+    def __init__(
+        self,
+        num_heads: int,
+        d_model: int,
+        use_bias: bool,
+        masked: bool,
+        dropout: float = 0.1,
+    ):
         super().__init__()
         assert d_model % num_heads == 0
 
@@ -57,7 +80,7 @@ class MultiHeadAttention(nn.Module):
         batch_size, seq_len, d_model = x.size()
 
         qkv = self.qkv_proj(x)
-        
+
         # Split into Q, K, V: each is [batch_size, seq_len, d_model]
         q, k, v = qkv.split(self.d_model, dim=-1)
 
@@ -77,14 +100,20 @@ class MultiHeadAttention(nn.Module):
 class RotaryPositionalEmbedding(nn.Module):
     def __init__(self, d_model):
         super().__init__()
-        
 
     def forward(self):
         pass
 
 
 class TransformerBlock(nn.Module):
-    def __init__(self, num_heads: int, d_model: int, use_bias: bool, masked: bool, dropout: float = 0.1):
+    def __init__(
+        self,
+        num_heads: int,
+        d_model: int,
+        use_bias: bool,
+        masked: bool,
+        dropout: float = 0.1,
+    ):
         super().__init__()
         self.ln1 = nn.LayerNorm(d_model)
         self.mha = MultiHeadAttention(
@@ -97,7 +126,7 @@ class TransformerBlock(nn.Module):
         self.ln2 = nn.LayerNorm(d_model)
         self.mlp = nn.Sequential(
             nn.Linear(d_model, 4 * d_model, bias=use_bias),
-            nn.GELU(),
+            SwiGLU(d_model),
             nn.Dropout(dropout),
             nn.Linear(4 * d_model, d_model, bias=use_bias),
             nn.Dropout(dropout),
