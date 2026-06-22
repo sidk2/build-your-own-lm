@@ -17,6 +17,10 @@ class GPT(nn.Module):
         context_length: int = 512,
         dropout: float = 0.1,
         pad_token_id: int = -1,
+        use_moe: bool = False,
+        num_experts: int = 1,
+        moe_top_k: int = 1,
+        gate_noise_var: float = 1.0,
     ):
         super().__init__()
         self.vocab_size = vocab_size
@@ -27,6 +31,13 @@ class GPT(nn.Module):
         self.masked = masked
         self.context_length = context_length
         self.pad_token_id = pad_token_id
+        self.use_moe = use_moe
+        self.num_experts = num_experts
+        self.moe_top_k = moe_top_k
+        self.gate_noise_var = gate_noise_var
+
+        if use_moe == False and num_experts > 1:
+            raise ValueError("Invalid MoE configuration. MoE must be enabled to have more than one expert.")
 
         # Load tokenizer if path provided
         if tokenizer_path is not None:
@@ -56,6 +67,10 @@ class GPT(nn.Module):
                     use_bias=use_bias,
                     masked=masked,
                     dropout=dropout,
+                    use_moe=use_moe,
+                    num_experts=num_experts,
+                    moe_top_k=moe_top_k,
+                    gate_noise_var=gate_noise_var,
                 )
                 for _ in range(num_layers)
             ]

@@ -139,6 +139,31 @@ def main():
         help="Maximum sequence/context length",
     )
 
+    parser.add_argument(
+        "--use-moe",
+        action="store_true",
+        default=False,
+        help="Enable Mixture-of-Experts in Transformer MLP blocks",
+    )
+    parser.add_argument(
+        "--num-experts",
+        type=int,
+        default=1,
+        help="Number of experts to use when MoE is enabled",
+    )
+    parser.add_argument(
+        "--moe-top-k",
+        type=int,
+        default=1,
+        help="Number of experts selected per token in MoE routing",
+    )
+    parser.add_argument(
+        "--gate-noise-var",
+        type=float,
+        default=1.0,
+        help="Noise variance applied to MoE gating logits",
+    )
+
     # Training config
     parser.add_argument("--batch-size", type=int, default=32, help="Batch size")
     parser.add_argument(
@@ -240,6 +265,9 @@ def main():
         f"Training parameters:    lr={args.learning_rate}, min_lr={args.min_lr}, warmup_iters={args.warmup_iters}"
     )
     print(f"Batch Size:             {args.batch_size} | Max Steps: {args.max_iters}")
+    print(
+        f"MoE: use_moe={args.use_moe}, num_experts={args.num_experts}, moe_top_k={args.moe_top_k}, gate_noise_var={args.gate_noise_var}"
+    )
     print(f"Output Directory:       {args.out_dir}")
     print("-" * 60)
 
@@ -313,6 +341,10 @@ def main():
         masked=True,
         context_length=args.context_length,
         pad_token_id=pad_token_id,
+        use_moe=args.use_moe,
+        num_experts=args.num_experts,
+        moe_top_k=args.moe_top_k,
+        gate_noise_var=args.gate_noise_var,
     )
     model.to(device)
 

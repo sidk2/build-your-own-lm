@@ -17,6 +17,50 @@ def sinusoidal_positional_embedding(seq_len: int, d_model: int, n: int = 10_000)
     pe[:, 1::2] = torch.cos(positions * div_term)
     return pe
 
+class MoEGate(nn.Module):
+    def __init__(self, num_experts: int, n_selected: int, d_model: int, gate_noise_var: float = 1.0):
+        super().__init__()
+
+        assert num_experts >= n_selected, "Top-k for selection cannot exceed number of experts"
+        self.relevance_model = nn.Linear(d_model, num_experts)
+        self.noise_model = nn.Linear(d_model, num_experts)
+        self.num_experts = num_experts
+        self.k = n_selected
+        self.d_model = d_model
+        self.gate_noise_var = gate_noise_var
+        self.activation = nn.Softplus()
+
+    def forward(self, x: torch.Tensor):
+        relevance_scores = self.relevance_model(x)
+        noise = torch.randn_like(relevance_scores) * self.gate_noise_var
+        gated_logits = relevance_scores + noise * self.activation(self.noise_model(x))
+
+        if self.k < self.num_experts:
+            topk_vals, topk_idxs = torch.topk(gated_logits, self.k, dim=-1)
+            gated = torch.full_like(gated_logits, float("-inf"))
+            gated.scatter_(-1, topk_idxs, topk_vals)
+        else:
+            gated = gated_logits
+
+        return nn.functional.softmax(gated, dim=-1)
+
+
+class MoELayer(nn.Module):
+    def __init__(self, num_experts: int, n_selected: int, d_model: int, gate_noise_var: float = 1.0):
+        super().__init__()
+        self.num_experts = num_experts
+        self.k = n_selected
+        self.d_model = d_model
+        self.gate_noise_var = gate_noise_var
+
+        self.gate = MoEGate(num_experts, n_selected, d_model, gate_noise_var)
+        self.experts = nn.ModuleList([nn.Linear(d_model, d_model) for _ in range(num_experts)])
+
+    def forward(self, x: torch.Tensor):
+        gate_scores = self.gate(x)
+        expert_outputs = torch.stack([expert(x) for expert in self.experts], dim=-2)
+        return torch.sum(gate_scores.unsqueeze(-1) * expert_outputs, dim=-2)
+
 
 class SwiGLU(nn.Module):
     def __init__(self, dim):
@@ -113,6 +157,13 @@ class TransformerBlock(nn.Module):
         use_bias: bool,
         masked: bool,
         dropout: float = 0.1,
+<<<<<<< HEAD
+=======
+        use_moe: bool = False,
+        num_experts: int = 1,
+        moe_top_k: int = 1,
+        gate_noise_var: float = 1.0,
+>>>>>>> 7a69064 (implemented mixture of experts with top-k routing)
     ):
         super().__init__()
         self.ln1 = nn.LayerNorm(d_model)
@@ -124,13 +175,22 @@ class TransformerBlock(nn.Module):
             dropout=dropout,
         )
         self.ln2 = nn.LayerNorm(d_model)
-        self.mlp = nn.Sequential(
-            nn.Linear(d_model, 4 * d_model, bias=use_bias),
-            SwiGLU(d_model),
-            nn.Dropout(dropout),
-            nn.Linear(4 * d_model, d_model, bias=use_bias),
-            nn.Dropout(dropout),
-        )
+
+        if use_moe and num_experts > 1:
+            self.mlp = MoELayer(
+                num_experts=num_experts,
+                n_selected=min(moe_top_k, num_experts),
+                d_model=d_model,
+                gate_noise_var=gate_noise_var,
+            )
+        else:
+            self.mlp = nn.Sequential(
+                nn.Linear(d_model, 4 * d_model, bias=use_bias),
+                nn.GELU(),
+                nn.Dropout(dropout),
+                nn.Linear(4 * d_model, d_model, bias=use_bias),
+                nn.Dropout(dropout),
+            )
 
     def forward(self, x, mask=None):
         # Pre-LN and attention
